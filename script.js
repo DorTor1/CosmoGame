@@ -13,19 +13,43 @@ let clock = new THREE.Clock();
 let playerHealth = 3; // Начальное здоровье игрока
 let invulnerable = false; // Флаг неуязвимости после получения урона
 let gameOver = false; // Флаг для обозначения конца игры
+let gameStarted = false; // Флаг начала игры
+let gameScore = 0; // Счетчик очков
+let enemiesDefeated = 0; // Счетчик уничтоженных врагов
+let dataCollected = 0; // Счетчик собранных данных
+let missionObjective = 10; // Требуемое количество данных для завершения миссии
+let currentLevel = 1; // Текущий уровень
+let maxLevel = 3; // Максимальный уровень
+let levelCompleted = false; // Флаг завершения уровня
+let missionType = 'collect_data'; // Тип миссии: collect_data, flight_to_point, boss_fight
+let endPointReached = false; // Флаг достижения конечной точки для миссии полета
+let bossDefeated = false; // Флаг победы над боссом
+let waypoint = null; // Маркер конечной точки для миссии полета
+let boss = null; // Объект босса
+let bossHealth = 0; // Текущее здоровье босса
+let bossMaxHealth = 100; // Максимальное здоровье босса
+let bossHealthBar = null; // Полоса здоровья босса
 const healthPacks = []; // Массив для хранения аптечек
+const enemyIndicators = []; // Массив для индикаторов врагов
+const dataFragments = []; // Массив для фрагментов данных
 
 const asteroids = [];
 const aliens = []; // Теперь будем использовать этот массив
 const lasers = [];
+const enemyLasers = []; // Массив для лазеров врагов
 let lastShotTime = 0; // Время последнего выстрела для перезарядки
 const shootCooldown = 0.25; // Перезарядка в секундах (четверть секунды)
 const MAX_ASTEROIDS = 50; // Максимальное количество астероидов на сцене
 const ASTEROID_SPAWN_DISTANCE = 400; // Минимальное расстояние от центра для спавна
 const MAX_ENEMIES = 12; // Увеличиваем максимальное количество врагов
-const ENEMY_SPAWN_DISTANCE = 500; // Появляются чуть дальше астероидов
-const ENEMY_SPEED = 20; // Скорость движения врага
+const ENEMY_SPAWN_DISTANCE = 300; // Уменьшаем расстояние появления врагов для лучшей видимости
+const ENEMY_SPEED = 10; // Снижаем базовую скорость движения врага
+const ENEMY_DETECTION_RADIUS = 400; // Увеличиваем радиус обнаружения игрока
+const ENEMY_ATTACK_RADIUS = 200; // Радиус начала атаки
+const ENEMY_LASER_SPEED = 120; // Скорость лазера врага
 const HEALTH_PACK_DROP_CHANCE = 0.8; // 80% шанс выпадения аптечки из астероида для тестирования
+const DATA_FRAGMENT_DROP_CHANCE_ASTEROID = 0.25; // 25% шанс выпадения фрагмента данных из астероида
+const DATA_FRAGMENT_DROP_CHANCE_ENEMY = 0.50; // 50% шанс выпадения фрагмента данных из врага
 
 const ENEMY_TYPES = {
     FIGHTER: 'fighter',    // Стандартный быстрый истребитель
@@ -154,6 +178,28 @@ const healthPackMaterial = new THREE.MeshPhongMaterial({
     emissive: 0x00ff00,
     emissiveIntensity: 0.5,
     shininess: 50
+});
+
+// Материалы для вражеских лазеров (отличные от лазеров игрока)
+const enemyLaserMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000, // Красный цвет
+    transparent: true,
+    opacity: 0.8
+});
+
+const enemyLaserGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff3300, // Красно-оранжевый цвет
+    transparent: true,
+    opacity: 0.5
+});
+
+// Цвета для фрагментов данных
+const dataFragmentMaterial = new THREE.MeshPhongMaterial({
+    color: 0xffcc00, // Золотистый цвет
+    emissive: 0xffcc00,
+    emissiveIntensity: 0.8,
+    shininess: 100,
+    specular: 0xffffff
 });
 
 // console.log("Запуск скрипта..."); // Убираем логи
@@ -324,6 +370,9 @@ function init() {
     pauseOverlay.style.flexDirection = 'column';
     pauseOverlay.style.justifyContent = 'center';
     pauseOverlay.style.alignItems = 'center';
+    // Добавляем box-sizing и padding
+    pauseOverlay.style.boxSizing = 'border-box';
+    pauseOverlay.style.padding = '20px'; // Добавим небольшой отступ
 
     // Добавляем заголовок игры
     const gameTitle = document.createElement('h1');
@@ -336,7 +385,7 @@ function init() {
 
     // Создаем кнопку запуска игры
     const startButton = document.createElement('button');
-    startButton.textContent = 'НАЖМИТЕ, ЧТОБЫ НАЧАТЬ';
+    startButton.textContent = 'CLICK TO START'; // Было: 'НАЖМИТЕ, ЧТОБЫ НАЧАТЬ'
     startButton.style.backgroundColor = '#3366cc';
     startButton.style.color = 'white';
     startButton.style.border = 'none';
@@ -362,10 +411,10 @@ function init() {
     const gameInstructions = document.createElement('div');
     gameInstructions.innerHTML = `
         <p style="color: white; margin-top: 2rem; text-align: center; font-family: Arial, sans-serif;">
-            Управление: WASD - движение, Мышь - поворот, Пробел - стрельба<br>
-            Уничтожайте астероиды и вражеские корабли!
+            Controls: WASD - Move, Mouse - Look, Space - Shoot<br>
+            Destroy asteroids and enemy ships!
         </p>
-    `;
+    `; // Было: Управление: WASD - движение, Мышь - поворот, Пробел - стрельба<br> Уничтожайте астероиды и вражеские корабли!
 
     // Собираем экран паузы
     pauseOverlay.appendChild(gameTitle);
@@ -393,7 +442,7 @@ function init() {
 
     scene.add(controls.getObject()); // Добавляем объект камеры из PointerLockControls
    
-    // --- Обработка ввода для PointerLock (раскомментировано) ---
+    // --- Обработка ввода для PointerLock (раскомментировано) --- 
     const onKeyDown = function (event) {
         switch (event.code) {
             case 'ArrowUp':
@@ -462,9 +511,36 @@ function init() {
     // --- Создаем интерфейс здоровья ---
     createHealthUI();
 
+    // --- Создаем индикаторы врагов ---
+    createEnemyIndicators();
+
     // --- Обработчик изменения размера окна ---
     window.addEventListener('resize', onWindowResize);
     // console.log("Завершение init()"); // Убираем логи
+
+    // Создаем звезды (фон)
+    addStars();
+
+    // Создаем астероиды
+    for (let i = 0; i < MAX_ASTEROIDS; i++) {
+        createAsteroid();
+    }
+
+    // Создаем начальных врагов
+    console.log("Creating initial enemies..."); // Было: "Создаем начальных врагов..."
+    const initialEnemies = 5; // Количество начальных врагов
+    for (let i = 0; i < initialEnemies; i++) {
+        const enemy = createEnemy();
+        if (enemy) {
+            console.log("Enemy created during initialization:", enemy.userData.type); // Было: "Создан враг при инициализации:"
+        }
+    }
+
+    // --- Создаем счетчик очков и прогресс миссии ---
+    createScoreUI();
+    
+    // --- Показываем сюжет и описание миссии ---
+    showMissionIntro();
 }
 
 function addStars() {
@@ -518,7 +594,7 @@ function createAsteroid() {
     const z = spawnRadius * Math.sin(angle) * Math.cos(elevation);
     const y = spawnRadius * Math.sin(elevation) + THREE.MathUtils.randFloatSpread(200); // Добавляем разброс по Y
 
-    asteroid.position.set(x, y, z);
+        asteroid.position.set(x, y, z);
     // Добавляем случайное неравномерное масштабирование для еще большего разнообразия
     const baseScale = THREE.MathUtils.randFloat(1.5, 7); // Базовый размер
     asteroid.scale.set(
@@ -526,14 +602,14 @@ function createAsteroid() {
         baseScale * (1 + Math.random() * 0.4), // Y: базовый + до 40% больше
         baseScale * (1 + Math.random() * 0.4)  // Z: базовый + до 40% больше
     );
-    asteroid.rotation.set(
-        Math.random() * Math.PI * 2,
-        Math.random() * Math.PI * 2,
-        Math.random() * Math.PI * 2
-    );
+        asteroid.rotation.set(
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2
+        );
 
     // Добавляем вращение
-    asteroid.userData.rotationSpeed = new THREE.Vector3(
+        asteroid.userData.rotationSpeed = new THREE.Vector3(
         THREE.MathUtils.randFloat(-0.02, 0.02), // Увеличиваем скорость вращения
         THREE.MathUtils.randFloat(-0.02, 0.02),
         THREE.MathUtils.randFloat(-0.02, 0.02)
@@ -545,15 +621,16 @@ function createAsteroid() {
         THREE.MathUtils.randFloatSpread(driftSpeed),
         THREE.MathUtils.randFloatSpread(driftSpeed * 0.5), // Меньше по Y
         THREE.MathUtils.randFloatSpread(driftSpeed)
-    );
+        );
 
-    scene.add(asteroid);
-    asteroids.push(asteroid);
-}
+        scene.add(asteroid);
+        asteroids.push(asteroid);
+    }
 
 // --- Функция создания одного врага ---
 function createEnemy() {
     if (aliens.length >= MAX_ENEMIES) {
+        console.log("Maximum enemies reached:", MAX_ENEMIES); // Было: "Достигнут максимум врагов:"
         return; // Достигли лимита
     }
 
@@ -769,7 +846,7 @@ function createEnemy() {
     }
 
     // Позиция появления (аналогично астероидам, но дальше)
-    const spawnRadius = ENEMY_SPAWN_DISTANCE + Math.random() * 200; // 500-700
+    const spawnRadius = ENEMY_SPAWN_DISTANCE + Math.random() * 100; // 300-400
     const angle = Math.random() * Math.PI * 2;
     const elevation = Math.random() * Math.PI - Math.PI / 2;
 
@@ -781,11 +858,11 @@ function createEnemy() {
     
     // Размер в зависимости от типа
     if (enemyType === ENEMY_TYPES.DESTROYER) {
-        enemy.scale.setScalar(2.0); // Разрушители больше
+        enemy.scale.setScalar(3.0); // Увеличиваем размер разрушителей
     } else if (enemyType === ENEMY_TYPES.SCOUT) {
-        enemy.scale.setScalar(1.2); // Разведчики меньше
+        enemy.scale.setScalar(2.0); // Увеличиваем размер разведчиков
     } else {
-        enemy.scale.setScalar(1.5); // Стандартный размер для истребителей
+        enemy.scale.setScalar(2.5); // Увеличиваем размер истребителей
     }
 
     // Начальная ориентация (пусть смотрят примерно к центру)
@@ -801,16 +878,16 @@ function createEnemy() {
     let speed, rotationSpeed;
     
     if (enemyType === ENEMY_TYPES.DESTROYER) {
-        speed = ENEMY_SPEED * 0.6; // Медленнее
-        rotationSpeed = THREE.MathUtils.randFloat(-0.01, 0.01); // Менее маневренный
+        speed = ENEMY_SPEED * 0.5; // Еще медленнее
+        rotationSpeed = THREE.MathUtils.randFloat(-0.005, 0.005); // Еще менее маневренный
         enemy.userData.health = 3; // У разрушителей больше жизней
     } else if (enemyType === ENEMY_TYPES.SCOUT) {
-        speed = ENEMY_SPEED * 1.6; // Намного быстрее
-        rotationSpeed = THREE.MathUtils.randFloat(-0.03, 0.03); // Очень маневренный
+        speed = ENEMY_SPEED * 1.3; // Быстрее, но не так сильно
+        rotationSpeed = THREE.MathUtils.randFloat(-0.015, 0.015); // Маневренный, но более контролируемый
         enemy.userData.health = 1; // Хрупкие
     } else {
         speed = ENEMY_SPEED;
-        rotationSpeed = THREE.MathUtils.randFloat(-0.02, 0.02);
+        rotationSpeed = THREE.MathUtils.randFloat(-0.01, 0.01); // Более плавные повороты
         enemy.userData.health = 2; // Стандартное здоровье
     }
     
@@ -820,11 +897,34 @@ function createEnemy() {
     // Добавляем поведенческие параметры
     enemy.userData.aggressiveness = Math.random(); // 0 - пассивный, 1 - агрессивный
     enemy.userData.lastShotTime = 0; // Время последнего выстрела
-    enemy.userData.shootingCooldown = enemyType === ENEMY_TYPES.DESTROYER ? 3.0 : 
-                                     (enemyType === ENEMY_TYPES.SCOUT ? 1.0 : 2.0); // Время перезарядки
+    enemy.userData.shootingCooldown = enemyType === ENEMY_TYPES.DESTROYER ? 4.0 : 
+                                     (enemyType === ENEMY_TYPES.SCOUT ? 2.0 : 3.0); // Увеличиваем время перезарядки
+
+    // Параметры для охоты
+    enemy.userData.targetingPlayer = false; // Флаг, что враг преследует игрока
+    enemy.userData.attackMode = false; // Флаг, что враг атакует игрока
+    enemy.userData.orbitDistance = THREE.MathUtils.randFloat(80, 120); // Увеличиваем дистанцию орбиты при атаке
+    enemy.userData.orbitSpeed = THREE.MathUtils.randFloat(0.1, 0.4) * (Math.random() > 0.5 ? 1 : -1); // Уменьшаем скорость орбиты
+    enemy.userData.smoothFactor = 0.02; // Фактор плавности движения для всех маневров
+    enemy.userData.positionOffset = new THREE.Vector3(
+        THREE.MathUtils.randFloatSpread(30), 
+        THREE.MathUtils.randFloatSpread(20), 
+        THREE.MathUtils.randFloatSpread(30)
+    ); // Уникальное смещение для каждого врага, чтобы они не накладывались друг на друга
 
     scene.add(enemy);
     aliens.push(enemy);
+    
+    // Добавляем светящийся эффект для лучшей видимости
+    const enemyLight = new THREE.PointLight(
+        enemyType === ENEMY_TYPES.DESTROYER ? 0x0066ff : 
+        enemyType === ENEMY_TYPES.SCOUT ? 0x00ff66 : 
+        0xff3300, 
+        1, 30);
+    enemyLight.position.set(0, 0, 0);
+    enemy.add(enemyLight);
+    
+    return enemy;
 }
 
 // --- Функция стрельбы ---
@@ -1044,7 +1144,7 @@ function animate() {
         velocity.x -= velocity.x * 5.0 * delta; // Уменьшим немного коэффициент затухания
         velocity.z -= velocity.z * 5.0 * delta;
         velocity.y -= velocity.y * 5.0 * delta; // Добавим затухание по Y
-
+        
         // Получаем направление взгляда камеры
         const cameraDirection = new THREE.Vector3();
         camera.getWorldDirection(cameraDirection);
@@ -1165,12 +1265,20 @@ function animate() {
                 
                 // Отладка: проверяем шанс выпадения аптечки
                 const randValue = Math.random();
-                console.log("Попадание в астероид! Шанс аптечки:", randValue, "< " + HEALTH_PACK_DROP_CHANCE);
+                console.log("Hit asteroid! Health pack chance:", randValue, "< " + HEALTH_PACK_DROP_CHANCE); // Было: "Попадание в астероид! Шанс аптечки:"
                 
                 // С некоторым шансом создаем аптечку
                 if (randValue < HEALTH_PACK_DROP_CHANCE) {
-                    console.log("Выпала аптечка из астероида!");
+                    console.log("Health pack dropped from asteroid!"); // Было: "Выпала аптечка из астероида!"
                     createHealthPack(asteroid.position.clone());
+                }
+                
+                // С некоторым шансом создаем фрагмент данных из астероида
+                if (Math.random() < DATA_FRAGMENT_DROP_CHANCE_ASTEROID) {
+                    console.log("Data fragment dropped from asteroid!"); // Было: "Выпал фрагмент данных из астероида!"
+                    createDataFragment(asteroid.position.clone());
+                    // Добавляем очки за добычу фрагмента данных из астероида
+                    gameScore += 100;
                 }
 
                 scene.remove(asteroid);
@@ -1204,7 +1312,29 @@ function animate() {
                 scene.remove(enemy);
                 aliens.splice(k, 1);
 
-                // TODO: Добавить эффект взрыва врага/счет очков
+                // Добавляем очки за уничтожение врага в зависимости от типа
+                if (enemy.userData.type === ENEMY_TYPES.DESTROYER) {
+                    gameScore += 300; // Больше очков за уничтожение сильного врага
+                } else if (enemy.userData.type === ENEMY_TYPES.SCOUT) {
+                    gameScore += 200; // За быстрого разведчика
+                } else {
+                    gameScore += 100; // За обычного истребителя
+                }
+                
+                // Создаем взрыв
+                createExplosion(enemy.position, enemy.scale.x * 0.6, 0xff3300);
+                
+                // Проверяем шанс выпадения фрагмента данных из врага
+                if (Math.random() < DATA_FRAGMENT_DROP_CHANCE_ENEMY) {
+                    console.log("Data fragment dropped from enemy!"); // Было: "Выпал фрагмент данных из врага!"
+                    createDataFragment(enemy.position.clone());
+                }
+                
+                // Увеличиваем счетчик уничтоженных врагов
+                enemiesDefeated++;
+                
+                // Обновляем UI
+                updateScoreUI();
 
                 laserHitEnemy = true;
                 break; // Один лазер - один враг
@@ -1225,24 +1355,225 @@ function animate() {
     for (let i = aliens.length - 1; i >= 0; i--) {
         const enemy = aliens[i];
 
-        // Простое движение вперед и легкий поворот
-        enemy.position.addScaledVector(enemy.userData.velocity, delta);
-        enemy.rotateY(enemy.userData.rotationSpeed * delta);
+        // Проверяем расстояние до игрока
+        const distanceToPlayer = enemy.position.distanceTo(player.position);
+        
+        // Решение охотиться за игроком
+        if (distanceToPlayer < ENEMY_DETECTION_RADIUS && !enemy.userData.targetingPlayer) {
+            enemy.userData.targetingPlayer = true;
+            enemy.userData.initialDetection = true; // Флаг первого обнаружения
+        }
+        
+        // Решение атаковать игрока
+        if (distanceToPlayer < ENEMY_ATTACK_RADIUS && !enemy.userData.attackMode) {
+            enemy.userData.attackMode = true;
+            enemy.userData.orbitAngle = Math.random() * Math.PI * 2; // Случайный начальный угол орбиты
+        }
+        
+        // Добавляем случайное смещение для орбиты
+        if (!enemy.userData.orbitOffset) {
+            enemy.userData.orbitOffset = {
+                x: THREE.MathUtils.randFloatSpread(30),
+                y: THREE.MathUtils.randFloatSpread(20),
+                z: THREE.MathUtils.randFloatSpread(30)
+            };
+        }
+        
+        // Поведение в зависимости от режима
+        if (enemy.userData.attackMode) {
+            // Режим атаки: кружимся вокруг игрока и стреляем
+            
+            // Обновляем угол орбиты
+            enemy.userData.orbitAngle += enemy.userData.orbitSpeed * delta * 0.8;
+            
+            // Вычисляем новую позицию на орбите вокруг игрока
+            const orbitCenter = player.position.clone();
+            const orbitOffset = new THREE.Vector3(
+                Math.cos(enemy.userData.orbitAngle) * enemy.userData.orbitDistance,
+                15 * Math.sin(enemy.userData.orbitAngle * 0.3) + enemy.userData.orbitOffset.y, // Плавное вертикальное движение
+                Math.sin(enemy.userData.orbitAngle) * enemy.userData.orbitDistance
+            );
+            
+            // Добавляем индивидуальное смещение для каждого врага
+            orbitOffset.x += enemy.userData.orbitOffset.x * 0.3;
+            orbitOffset.z += enemy.userData.orbitOffset.z * 0.3;
+            
+            // Плавно перемещаемся к позиции на орбите
+            const targetPosition = orbitCenter.add(orbitOffset);
+            
+            // Более плавное движение с ограничением скорости
+            const maxStep = delta * 30; // Максимальное перемещение за кадр
+            const distance = enemy.position.distanceTo(targetPosition);
+            const step = Math.min(distance * 0.05, maxStep); // 5% расстояния или максимум
+            
+            if (distance > 1) { // Если враг находится достаточно далеко от цели
+                const direction = new THREE.Vector3().subVectors(targetPosition, enemy.position).normalize();
+                enemy.position.addScaledVector(direction, step);
+            }
+            
+            // Плавный поворот к игроку
+            const targetDirection = new THREE.Vector3().subVectors(player.position, enemy.position).normalize();
+            const currentDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+            
+            // Используем quaternion для плавного поворота
+            const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                currentDirection, targetDirection);
+            enemy.quaternion.slerp(targetQuaternion, Math.min(0.05, delta * 1.5));
+            
+            // Стреляем в игрока
+            const currentTime = clock.getElapsedTime();
+            if (currentTime - enemy.userData.lastShotTime > enemy.userData.shootingCooldown) {
+                // Проверяем, что игрок находится в поле зрения (перед врагом)
+                const directionToPlayer = player.position.clone().sub(enemy.position).normalize();
+                const enemyForward = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+                const dotProduct = directionToPlayer.dot(enemyForward);
+                
+                if (dotProduct > 0.9) { // Угол менее ~25 градусов - более точное прицеливание
+                    createEnemyLaser(enemy);
+                    enemy.userData.lastShotTime = currentTime;
+                }
+            }
+        } 
+        else if (enemy.userData.targetingPlayer) {
+            // Режим охоты: летим к игроку
+            // Вычисляем направление к игроку
+            const directionToPlayer = player.position.clone().sub(enemy.position).normalize();
+            
+            // При первом обнаружении делаем агрессивный поворот в сторону игрока
+            if (enemy.userData.initialDetection) {
+                // Вместо мгновенного поворота делаем начальный поворот более плавным
+                const initQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                    new THREE.Vector3(0, 0, -1), directionToPlayer);
+                enemy.quaternion.slerp(initQuaternion, 0.2); // 20% поворот за один кадр
+                enemy.userData.initialDetection = false;
+            } else {
+                // Плавный поворот в сторону игрока
+                const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                    new THREE.Vector3(0, 0, -1), directionToPlayer);
+                enemy.quaternion.slerp(targetQuaternion, enemy.userData.smoothFactor);
+            }
+            
+            // Обновляем скорость в зависимости от типа врага
+            let speed;
+            if (enemy.userData.type === ENEMY_TYPES.DESTROYER) {
+                speed = ENEMY_SPEED * 0.5;
+            } else if (enemy.userData.type === ENEMY_TYPES.SCOUT) {
+                speed = ENEMY_SPEED * 1.3;
+            } else {
+                speed = ENEMY_SPEED;
+            }
+            
+            // Инициализируем текущую скорость, если её ещё нет
+            if (!enemy.userData.currentSpeed) {
+                enemy.userData.currentSpeed = speed * 0.3; // Начинаем с 30% скорости
+            }
+            
+            // Плавно изменяем скорость (акселерация/замедление)
+            const speedDiff = speed - enemy.userData.currentSpeed;
+            enemy.userData.currentSpeed += speedDiff * Math.min(delta * 0.5, 0.03); // 3% разницы за кадр или меньше
 
-        // Обновляем вектор скорости после поворота (чтобы летели по новой траектории)
-        enemy.getWorldDirection(enemy.userData.velocity); // Получаем новое локальное -Z направление
-        enemy.userData.velocity.multiplyScalar(ENEMY_SPEED);
+            // Двигаемся вперед
+            const enemyForward = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+            enemy.position.addScaledVector(enemyForward, enemy.userData.currentSpeed * delta);
+
+            // Добавляем небольшое случайное отклонение для более естественного движения
+            if (Math.random() < 0.05) { // С вероятностью 5% за кадр
+                const randomOffset = new THREE.Vector3(
+                    THREE.MathUtils.randFloatSpread(1),
+                    THREE.MathUtils.randFloatSpread(0.5),
+                    THREE.MathUtils.randFloatSpread(1)
+                );
+                enemy.position.add(randomOffset);
+            }
+        } 
+        else {
+            // Стандартное поведение: дрейф по инерции
+            enemy.position.addScaledVector(enemy.userData.velocity, delta);
+            enemy.rotateY(enemy.userData.rotationSpeed * delta);
+            
+            // Обновляем вектор скорости после поворота
+            const forwardDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+            enemy.userData.velocity.copy(forwardDirection.multiplyScalar(ENEMY_SPEED * 0.3)); // Снижаем скорость дрейфа
+        }
 
         // Удаляем врагов, улетевших слишком далеко (опционально)
         const maxEnemyDistance = 1200;
-         if (enemy.position.length() > maxEnemyDistance) {
-             scene.remove(enemy);
-             aliens.splice(i, 1);
-             continue; // Переходим к следующему врагу
-         }
+        if (enemy.position.length() > maxEnemyDistance) {
+            scene.remove(enemy);
+            aliens.splice(i, 1);
+            continue; // Переходим к следующему врагу
+        }
 
-        // TODO: Добавить стрельбу врагов
-        // TODO: Добавить столкновение врагов с игроком
+        // Проверка столкновения с игроком
+        if (!invulnerable) {
+            const enemyBox = new THREE.Box3().setFromObject(enemy);
+            const playerBox = new THREE.Box3().setFromObject(player);
+            
+            if (enemyBox.intersectsBox(playerBox)) {
+                // Столкновение с врагом!
+                takeDamage(); // Наносим урон игроку
+                
+                // Создаем эффект взрыва врага
+                createExplosion(enemy.position, enemy.scale.x, 0xff0000);
+                
+                // Удаляем врага
+                scene.remove(enemy);
+                aliens.splice(i, 1);
+                
+                break; // После столкновения выходим (важно для неуязвимости)
+            }
+        }
+    }
+
+    // --- Обновление лазеров врагов ---
+    for (let i = enemyLasers.length - 1; i >= 0; i--) {
+        const laser = enemyLasers[i];
+        
+        laser.position.addScaledVector(laser.userData.velocity, delta);
+        
+        // Удаляем лазер, если улетел далеко
+        const maxDistance = 1000;
+        if (laser.position.length() > maxDistance) {
+            scene.remove(laser);
+            enemyLasers.splice(i, 1);
+            continue;
+        }
+        
+        // Проверка столкновения с игроком
+        if (!invulnerable) {
+            const laserBox = new THREE.Box3().setFromObject(laser);
+            const playerBox = new THREE.Box3().setFromObject(player);
+            
+            if (laserBox.intersectsBox(playerBox)) {
+                // Столкновение с игроком!
+                takeDamage(); // Наносим урон игроку
+                
+                // Эффект попадания
+                createExplosion(laser.position, 0.5, 0xff5500);
+                
+                // Удаляем лазер
+                scene.remove(laser);
+                enemyLasers.splice(i, 1);
+                continue;
+            }
+        }
+        
+        // Проверка столкновения с астероидами
+        for (let j = asteroids.length - 1; j >= 0; j--) {
+            const asteroid = asteroids[j];
+            const asteroidBox = new THREE.Box3().setFromObject(asteroid);
+            const laserBox = new THREE.Box3().setFromObject(laser);
+            
+            if (laserBox.intersectsBox(asteroidBox)) {
+                // Лазер попал в астероид
+                createExplosion(laser.position, 0.3, 0xff3300);
+                
+                // Удаляем лазер
+                scene.remove(laser);
+                enemyLasers.splice(i, 1);
+                break;
+            }
+        }
     }
 
     // --- Возрождение астероидов ---
@@ -1255,8 +1586,11 @@ function animate() {
     // --- Возрождение врагов ---
     if (aliens.length < MAX_ENEMIES) {
         // Добавим небольшую задержку перед спавном, чтобы не появлялись мгновенно
-        if (Math.random() < 0.01) { // Шанс 1% на спавн в кадр (можно настроить)
-             createEnemy();
+        if (Math.random() < 0.05) { // Увеличиваем шанс до 5% на спавн в кадр
+            const enemy = createEnemy();
+            if (enemy) { // Добавим проверку, что враг действительно был создан
+                 console.log("Created new enemy of type:", enemy.userData.type, "Total enemies:", aliens.length); // Было: "Создан новый враг типа:", ... "Всего врагов:"
+            }
         }
     }
 
@@ -1277,7 +1611,7 @@ function animate() {
         // Проверяем время жизни
         const packAge = clock.getElapsedTime() - healthPack.userData.creationTime;
         if (packAge > healthPack.userData.lifespan) {
-            console.log("Аптечка истекла по времени жизни");
+            console.log("Health pack expired"); // Было: "Аптечка истекла по времени жизни"
             scene.remove(healthPack);
             healthPacks.splice(i, 1);
             continue;
@@ -1296,7 +1630,7 @@ function animate() {
         if (healthPackBox.intersectsBox(playerBox)) {
             // Игрок подобрал аптечку
             if (playerHealth < 3) { // Ограничиваем максимальное здоровье
-                console.log("Игрок подобрал аптечку! Здоровье +1");
+                console.log("Player picked up health pack! Health +1"); // Было: "Игрок подобрал аптечку! Здоровье +1"
                 playerHealth++;
                 updateHealthUI();
                 
@@ -1337,30 +1671,239 @@ function animate() {
     for (let i = aliens.length - 1; i >= 0; i--) {
         const enemy = aliens[i];
 
-        // Простое движение вперед и легкий поворот
-        enemy.position.addScaledVector(enemy.userData.velocity, delta);
-        enemy.rotateY(enemy.userData.rotationSpeed * delta);
+        // Проверяем расстояние до игрока
+        const distanceToPlayer = enemy.position.distanceTo(player.position);
+        
+        // Решение охотиться за игроком
+        if (distanceToPlayer < ENEMY_DETECTION_RADIUS && !enemy.userData.targetingPlayer) {
+            enemy.userData.targetingPlayer = true;
+            enemy.userData.initialDetection = true; // Флаг первого обнаружения
+        }
+        
+        // Решение атаковать игрока
+        if (distanceToPlayer < ENEMY_ATTACK_RADIUS && !enemy.userData.attackMode) {
+            enemy.userData.attackMode = true;
+            enemy.userData.orbitAngle = Math.random() * Math.PI * 2; // Случайный начальный угол орбиты
+        }
+        
+        // Добавляем случайное смещение для орбиты
+        if (!enemy.userData.orbitOffset) {
+            enemy.userData.orbitOffset = {
+                x: THREE.MathUtils.randFloatSpread(30),
+                y: THREE.MathUtils.randFloatSpread(20),
+                z: THREE.MathUtils.randFloatSpread(30)
+            };
+        }
+        
+        // Поведение в зависимости от режима
+        if (enemy.userData.attackMode) {
+            // Режим атаки: кружимся вокруг игрока и стреляем
+            
+            // Обновляем угол орбиты
+            enemy.userData.orbitAngle += enemy.userData.orbitSpeed * delta * 0.8;
+            
+            // Вычисляем новую позицию на орбите вокруг игрока
+            const orbitCenter = player.position.clone();
+            const orbitOffset = new THREE.Vector3(
+                Math.cos(enemy.userData.orbitAngle) * enemy.userData.orbitDistance,
+                15 * Math.sin(enemy.userData.orbitAngle * 0.3) + enemy.userData.orbitOffset.y, // Плавное вертикальное движение
+                Math.sin(enemy.userData.orbitAngle) * enemy.userData.orbitDistance
+            );
+            
+            // Добавляем индивидуальное смещение для каждого врага
+            orbitOffset.x += enemy.userData.orbitOffset.x * 0.3;
+            orbitOffset.z += enemy.userData.orbitOffset.z * 0.3;
+            
+            // Плавно перемещаемся к позиции на орбите
+            const targetPosition = orbitCenter.add(orbitOffset);
+            
+            // Более плавное движение с ограничением скорости
+            const maxStep = delta * 30; // Максимальное перемещение за кадр
+            const distance = enemy.position.distanceTo(targetPosition);
+            const step = Math.min(distance * 0.05, maxStep); // 5% расстояния или максимум
+            
+            if (distance > 1) { // Если враг находится достаточно далеко от цели
+                const direction = new THREE.Vector3().subVectors(targetPosition, enemy.position).normalize();
+                enemy.position.addScaledVector(direction, step);
+            }
+            
+            // Плавный поворот к игроку
+            const targetDirection = new THREE.Vector3().subVectors(player.position, enemy.position).normalize();
+            const currentDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+            
+            // Используем quaternion для плавного поворота
+            const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                currentDirection, targetDirection);
+            enemy.quaternion.slerp(targetQuaternion, Math.min(0.05, delta * 1.5));
+            
+            // Стреляем в игрока
+            const currentTime = clock.getElapsedTime();
+            if (currentTime - enemy.userData.lastShotTime > enemy.userData.shootingCooldown) {
+                // Проверяем, что игрок находится в поле зрения (перед врагом)
+                const directionToPlayer = player.position.clone().sub(enemy.position).normalize();
+                const enemyForward = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+                const dotProduct = directionToPlayer.dot(enemyForward);
+                
+                if (dotProduct > 0.9) { // Угол менее ~25 градусов - более точное прицеливание
+                    createEnemyLaser(enemy);
+                    enemy.userData.lastShotTime = currentTime;
+                }
+            }
+        } 
+        else if (enemy.userData.targetingPlayer) {
+            // Режим охоты: летим к игроку
+            // Вычисляем направление к игроку
+            const directionToPlayer = player.position.clone().sub(enemy.position).normalize();
+            
+            // При первом обнаружении делаем агрессивный поворот в сторону игрока
+            if (enemy.userData.initialDetection) {
+                // Вместо мгновенного поворота делаем начальный поворот более плавным
+                const initQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                    new THREE.Vector3(0, 0, -1), directionToPlayer);
+                enemy.quaternion.slerp(initQuaternion, 0.2); // 20% поворот за один кадр
+                enemy.userData.initialDetection = false;
+            } else {
+                // Плавный поворот в сторону игрока
+                const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                    new THREE.Vector3(0, 0, -1), directionToPlayer);
+                enemy.quaternion.slerp(targetQuaternion, enemy.userData.smoothFactor);
+            }
+            
+            // Обновляем скорость в зависимости от типа врага
+            let speed;
+            if (enemy.userData.type === ENEMY_TYPES.DESTROYER) {
+                speed = ENEMY_SPEED * 0.5;
+            } else if (enemy.userData.type === ENEMY_TYPES.SCOUT) {
+                speed = ENEMY_SPEED * 1.3;
+            } else {
+                speed = ENEMY_SPEED;
+            }
+            
+            // Инициализируем текущую скорость, если её ещё нет
+            if (!enemy.userData.currentSpeed) {
+                enemy.userData.currentSpeed = speed * 0.3; // Начинаем с 30% скорости
+            }
+            
+            // Плавно изменяем скорость (акселерация/замедление)
+            const speedDiff = speed - enemy.userData.currentSpeed;
+            enemy.userData.currentSpeed += speedDiff * Math.min(delta * 0.5, 0.03); // 3% разницы за кадр или меньше
 
-        // Обновляем вектор скорости после поворота (чтобы летели по новой траектории)
-        enemy.getWorldDirection(enemy.userData.velocity); // Получаем новое локальное -Z направление
-        enemy.userData.velocity.multiplyScalar(ENEMY_SPEED);
+            // Двигаемся вперед
+            const enemyForward = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+            enemy.position.addScaledVector(enemyForward, enemy.userData.currentSpeed * delta);
+
+            // Добавляем небольшое случайное отклонение для более естественного движения
+            if (Math.random() < 0.05) { // С вероятностью 5% за кадр
+                const randomOffset = new THREE.Vector3(
+                    THREE.MathUtils.randFloatSpread(1),
+                    THREE.MathUtils.randFloatSpread(0.5),
+                    THREE.MathUtils.randFloatSpread(1)
+                );
+                enemy.position.add(randomOffset);
+            }
+        } 
+        else {
+            // Стандартное поведение: дрейф по инерции
+            enemy.position.addScaledVector(enemy.userData.velocity, delta);
+            enemy.rotateY(enemy.userData.rotationSpeed * delta);
+            
+            // Обновляем вектор скорости после поворота
+            const forwardDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(enemy.quaternion);
+            enemy.userData.velocity.copy(forwardDirection.multiplyScalar(ENEMY_SPEED * 0.3)); // Снижаем скорость дрейфа
+        }
 
         // Удаляем врагов, улетевших слишком далеко (опционально)
         const maxEnemyDistance = 1200;
-         if (enemy.position.length() > maxEnemyDistance) {
-             scene.remove(enemy);
-             aliens.splice(i, 1);
-             continue; // Переходим к следующему врагу
-         }
+        if (enemy.position.length() > maxEnemyDistance) {
+            scene.remove(enemy);
+            aliens.splice(i, 1);
+            continue; // Переходим к следующему врагу
+        }
 
-        // TODO: Добавить стрельбу врагов
-        // TODO: Добавить столкновение врагов с игроком
+        // Проверка столкновения с игроком
+        if (!invulnerable) {
+            const enemyBox = new THREE.Box3().setFromObject(enemy);
+            const playerBox = new THREE.Box3().setFromObject(player);
+            
+            if (enemyBox.intersectsBox(playerBox)) {
+                // Столкновение с врагом!
+                takeDamage(); // Наносим урон игроку
+                
+                // Создаем эффект взрыва врага
+                createExplosion(enemy.position, enemy.scale.x, 0xff0000);
+                
+                // Удаляем врага
+                scene.remove(enemy);
+                aliens.splice(i, 1);
+                
+                break; // После столкновения выходим (важно для неуязвимости)
+            }
+        }
     }
 
+    // Обновляем индикаторы врагов
+    updateEnemyIndicators();
+
+    // --- Обновление и проверка столкновения с фрагментами данных ---
+    for (let i = dataFragments.length - 1; i >= 0; i--) {
+        const dataFragment = dataFragments[i];
+        
+        // Вращаем фрагмент данных
+        dataFragment.rotation.x += dataFragment.userData.rotationSpeed.x;
+        dataFragment.rotation.y += dataFragment.userData.rotationSpeed.y;
+        dataFragment.rotation.z += dataFragment.userData.rotationSpeed.z;
+        
+        // Плавающее движение
+        const floatOffset = Math.sin((clock.getElapsedTime() + dataFragment.userData.floatOffset) * dataFragment.userData.floatSpeed) * dataFragment.userData.floatHeight;
+        dataFragment.position.y = dataFragment.userData.startY + floatOffset;
+        
+        // Проверяем время жизни
+        const fragmentAge = clock.getElapsedTime() - dataFragment.userData.creationTime;
+        if (fragmentAge > dataFragment.userData.lifespan) {
+            scene.remove(dataFragment);
+            dataFragments.splice(i, 1);
+            continue;
+        }
+        
+        // Если время жизни заканчивается, делаем мигание
+        if (dataFragment.userData.lifespan - fragmentAge < 5) {
+            const blinkRate = Math.sin(fragmentAge * 10) * 0.5 + 0.5;
+            dataFragment.visible = blinkRate > 0.5;
+        }
+        
+        // Проверяем столкновение с игроком
+        const fragmentBox = new THREE.Box3().setFromObject(dataFragment);
+        const playerBox = new THREE.Box3().setFromObject(player);
+        
+        if (fragmentBox.intersectsBox(playerBox)) {
+            // Игрок подобрал фрагмент данных
+            dataCollected++;
+            gameScore += 500; // Добавляем очки за сбор данных
+            
+            // Эффект подбора
+            createExplosion(dataFragment.position, 1.0, 0xffee00);
+            
+            // Обновляем UI
+            updateScoreUI();
+            
+            // Удаляем фрагмент из сцены
+            scene.remove(dataFragment);
+            dataFragments.splice(i, 1);
+            
+            // Проверяем, собраны ли все данные для завершения уровня
+            if (dataCollected >= missionObjective) {
+                showLevelComplete();
+            }
+        }
+    }
+
+    // --- Обновление UI очков
+    updateScoreUI();
+    
     // Рендеринг сцены
     // controls.update(); // Обновляем OrbitControls (закомментировано, т.к. используем PointerLock)
     renderer.render(scene, camera);
-}
+} 
 
 // Функция для создания UI отображающего здоровье
 function createHealthUI() {
@@ -1489,7 +2032,7 @@ function endGame() {
     gameOverOverlay.style.alignItems = 'center';
     
     const gameOverText = document.createElement('h1');
-    gameOverText.textContent = 'ИГРА ОКОНЧЕНА';
+    gameOverText.textContent = 'GAME OVER';
     gameOverText.style.color = '#ff0000';
     gameOverText.style.fontSize = '4rem';
     gameOverText.style.marginBottom = '2rem';
@@ -1497,7 +2040,7 @@ function endGame() {
     gameOverText.style.textShadow = '0 0 10px #ff0000';
     
     const restartButton = document.createElement('button');
-    restartButton.textContent = 'НАЧАТЬ ЗАНОВО';
+    restartButton.textContent = 'RESTART';
     restartButton.style.backgroundColor = '#ff3300';
     restartButton.style.color = 'white';
     restartButton.style.border = 'none';
@@ -1531,7 +2074,7 @@ function endGame() {
 
 // Функция для создания аптечки
 function createHealthPack(position) {
-    console.log("Создание аптечки на позиции:", position);
+    console.log("Creating health pack at position:", position);
     
     try {
         // Создаем группу для аптечки
@@ -1581,11 +2124,11 @@ function createHealthPack(position) {
         // Добавляем в сцену и массив
         scene.add(healthPack);
         healthPacks.push(healthPack);
-        console.log("Аптечка создана! Всего аптечек:", healthPacks.length);
+        console.log("Health pack created! Total packs:", healthPacks.length);
         
         return healthPack;
     } catch (error) {
-        console.error("Ошибка при создании аптечки:", error);
+        console.error("Error creating health pack:", error);
         return null;
     }
 }
@@ -1659,4 +2202,1438 @@ function createExplosion(position, size, color) {
     }
     
     animateExplosion();
+}
+
+// Функция создания лазера врага
+function createEnemyLaser(enemy) {
+    // Создаем геометрию для лазера
+    const laserGeometry = new THREE.CylinderGeometry(0.1, 0.1, 15, 8);
+    laserGeometry.rotateX(Math.PI / 2); // Поворачиваем, чтобы лазер летел вдоль оси Z
+    
+    // Создаем основу лазера
+    const laser = new THREE.Mesh(laserGeometry, enemyLaserMaterial);
+    
+    // Создаем внешнее свечение (больший радиус, но полупрозрачный)
+    const glowGeometry = new THREE.CylinderGeometry(0.3, 0.3, 15, 8);
+    glowGeometry.rotateX(Math.PI / 2);
+    const glow = new THREE.Mesh(glowGeometry, enemyLaserGlowMaterial);
+    
+    // Добавляем свечение к лазеру
+    laser.add(glow);
+    
+    // Определяем направление на игрока
+    const direction = player.position.clone().sub(enemy.position).normalize();
+    
+    // Учитываем случайное отклонение (зависит от типа врага)
+    let accuracy;
+    if (enemy.userData.type === ENEMY_TYPES.DESTROYER) {
+        accuracy = 0.95; // Разрушители стреляют точно
+    } else if (enemy.userData.type === ENEMY_TYPES.SCOUT) {
+        accuracy = 0.7; // Разведчики менее точны
+    } else {
+        accuracy = 0.85; // Истребители средней точности
+    }
+    
+    // Добавляем небольшую случайность к направлению, если точность не 100%
+    if (accuracy < 1.0) {
+        const randomFactor = (1 - accuracy) * 0.2; // Максимальное отклонение
+        direction.x += THREE.MathUtils.randFloatSpread(randomFactor);
+        direction.y += THREE.MathUtils.randFloatSpread(randomFactor);
+        direction.z += THREE.MathUtils.randFloatSpread(randomFactor);
+        direction.normalize(); // Нормализуем после изменения
+    }
+    
+    // Устанавливаем позицию и направление
+    laser.position.copy(enemy.position);
+    laser.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+    
+    // Сохраняем направление и скорость
+    laser.userData.velocity = direction.multiplyScalar(ENEMY_LASER_SPEED);
+    
+    // Сохраняем информацию о стреляющем враге
+    laser.userData.shooter = enemy;
+    
+    // Добавляем в сцену и массив
+    scene.add(laser);
+    enemyLasers.push(laser);
+    
+    // Добавляем звуковой эффект (если есть)
+    // playLaserSound(); // (опционально)
+    
+    return laser;
+}
+
+// Функция создания индикаторов врагов
+function createEnemyIndicators() {
+    // Создаем контейнер для индикаторов
+    const indicatorsContainer = document.createElement('div');
+    indicatorsContainer.id = 'enemy-indicators';
+    indicatorsContainer.style.position = 'absolute';
+    indicatorsContainer.style.top = '0';
+    indicatorsContainer.style.left = '0';
+    indicatorsContainer.style.width = '100%';
+    indicatorsContainer.style.height = '100%';
+    indicatorsContainer.style.pointerEvents = 'none'; // Не блокируем взаимодействие
+    indicatorsContainer.style.zIndex = '1000';
+    document.body.appendChild(indicatorsContainer);
+}
+
+// Функция обновления индикаторов врагов
+function updateEnemyIndicators() {
+    // Очищаем старые индикаторы
+    const container = document.getElementById('enemy-indicators');
+    if (!container) return;
+    
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+    
+    // Если нет врагов, выходим
+    if (aliens.length === 0) return;
+    
+    // Максимальное количество индикаторов
+    const maxIndicators = 3;
+    
+    // Сортируем врагов по расстоянию до игрока
+    const sortedEnemies = [...aliens].sort((a, b) => {
+        const distA = a.position.distanceTo(player.position);
+        const distB = b.position.distanceTo(player.position);
+        return distA - distB;
+    }).slice(0, maxIndicators); // Берем только ближайших
+    
+    // Создаем индикаторы для ближайших врагов
+    sortedEnemies.forEach(enemy => {
+        // Получаем позицию врага в пространстве экрана
+        const enemyPos = enemy.position.clone();
+        const screenPos = enemyPos.project(camera);
+        
+        // Проверяем, находится ли враг в поле зрения камеры
+        const isInView = Math.abs(screenPos.x) <= 1 && Math.abs(screenPos.y) <= 1 && screenPos.z <= 1;
+        
+        // Если враг не в поле зрения, создаем индикатор
+        if (!isInView) {
+            // Ограничиваем координаты экрана в пределах видимой области
+            screenPos.x = Math.max(-0.9, Math.min(0.9, screenPos.x));
+            screenPos.y = Math.max(-0.9, Math.min(0.9, screenPos.y));
+            
+            // Если враг позади, показываем индикатор по краю экрана
+            if (screenPos.z > 1) {
+                // Нормализуем координаты для краев экрана
+                const angle = Math.atan2(screenPos.y, screenPos.x);
+                screenPos.x = 0.9 * Math.cos(angle);
+                screenPos.y = 0.9 * Math.sin(angle);
+            }
+            
+            // Создаем индикатор
+            const indicator = document.createElement('div');
+            indicator.className = 'enemy-indicator';
+            
+            // Устанавливаем стиль индикатора
+            indicator.style.position = 'absolute';
+            indicator.style.width = '20px';
+            indicator.style.height = '20px';
+            indicator.style.borderRadius = '50%';
+            
+            // Цвет зависит от типа врага
+            if (enemy.userData.type === ENEMY_TYPES.DESTROYER) {
+                indicator.style.backgroundColor = 'rgba(0, 100, 255, 0.7)';
+            } else if (enemy.userData.type === ENEMY_TYPES.SCOUT) {
+                indicator.style.backgroundColor = 'rgba(0, 255, 100, 0.7)';
+            } else {
+                indicator.style.backgroundColor = 'rgba(255, 50, 0, 0.7)';
+            }
+            
+            indicator.style.boxShadow = '0 0 10px ' + indicator.style.backgroundColor;
+            
+            // Преобразуем нормализованные координаты в пиксели
+            const left = (screenPos.x + 1) / 2 * window.innerWidth;
+            const top = (1 - screenPos.y) / 2 * window.innerHeight;
+            
+            indicator.style.left = (left - 10) + 'px'; // -10px для центрирования
+            indicator.style.top = (top - 10) + 'px';   // -10px для центрирования
+            
+            // Добавляем пульсацию
+            indicator.style.animation = 'pulse 1s infinite';
+            
+            // Добавляем расстояние до врага
+            const distance = Math.round(enemy.position.distanceTo(player.position));
+            indicator.title = `Enemy at distance ${distance} m`;
+            
+            // Добавляем индикатор в контейнер
+            container.appendChild(indicator);
+        }
+    });
+    
+    // Добавляем стиль анимации, если его еще нет
+    if (!document.getElementById('enemy-indicator-style')) {
+        const style = document.createElement('style');
+        style.id = 'enemy-indicator-style';
+        style.textContent = `
+            @keyframes pulse {
+                0% { transform: scale(0.8); opacity: 0.7; }
+                50% { transform: scale(1.2); opacity: 1; }
+                100% { transform: scale(0.8); opacity: 0.7; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+} 
+
+// Функция для создания фрагмента данных
+function createDataFragment(position) {
+    console.log("Creating data fragment at position:", position);
+    
+    try {
+        // Создаем группу для фрагмента данных
+        const dataFragment = new THREE.Group();
+        
+        // Основа фрагмента (кристалл)
+        const crystalGeometry = new THREE.OctahedronGeometry(1, 1); // Октаэдр для кристалла
+        const crystal = new THREE.Mesh(crystalGeometry, dataFragmentMaterial);
+        
+        // Добавляем свечение кристалла
+        const glowGeometry = new THREE.OctahedronGeometry(1.2, 1);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffdd44,
+            transparent: true,
+            opacity: 0.4
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        
+        // Добавляем все части в группу
+        dataFragment.add(crystal);
+        dataFragment.add(glow);
+        
+        // Устанавливаем позицию
+        dataFragment.position.copy(position);
+        dataFragment.scale.setScalar(1.0);
+        
+        // Добавляем вращение для заметности
+        dataFragment.userData.rotationSpeed = new THREE.Vector3(0.01, 0.02, 0.01);
+        
+        // Добавляем плавающее движение
+        dataFragment.userData.floatSpeed = 0.5 + Math.random() * 0.5;
+        dataFragment.userData.floatHeight = 0.5;
+        dataFragment.userData.startY = position.y;
+        dataFragment.userData.floatOffset = Math.random() * Math.PI * 2;
+        
+        // Добавляем свет к фрагменту для лучшей видимости
+        const dataLight = new THREE.PointLight(0xffcc00, 2, 15);
+        dataLight.position.set(0, 0, 0);
+        dataFragment.add(dataLight);
+        
+        // Устанавливаем время жизни (30 секунд)
+        dataFragment.userData.creationTime = clock.getElapsedTime();
+        dataFragment.userData.lifespan = 60; // В секундах (увеличиваем время жизни для упрощения сбора)
+        
+        // Добавляем в сцену и массив
+        scene.add(dataFragment);
+        dataFragments.push(dataFragment);
+        console.log("Data fragment created! Total fragments:", dataFragments.length);
+        
+        return dataFragment;
+    } catch (error) {
+        console.error("Error creating data fragment:", error);
+        return null;
+    }
+}
+
+// Функция создания UI для очков и прогресса миссии
+function createScoreUI() {
+    const scoreContainer = document.createElement('div');
+    scoreContainer.id = 'score-container';
+    scoreContainer.style.position = 'absolute';
+    scoreContainer.style.top = '20px';
+    scoreContainer.style.right = '20px';
+    scoreContainer.style.display = 'flex';
+    scoreContainer.style.flexDirection = 'column';
+    scoreContainer.style.alignItems = 'flex-end';
+    scoreContainer.style.zIndex = '9999';
+    
+    // Счетчик очков
+    const scoreElement = document.createElement('div');
+    scoreElement.id = 'score';
+    scoreElement.style.fontSize = '24px';
+    scoreElement.style.color = 'white';
+    scoreElement.style.textShadow = '0 0 5px #00aaff';
+    scoreElement.style.fontFamily = 'Arial, sans-serif';
+    scoreElement.style.marginBottom = '5px';
+    scoreElement.textContent = `Score: ${gameScore}`;
+    
+    // Индикатор уровня
+    const levelElement = document.createElement('div');
+    levelElement.id = 'level';
+    levelElement.style.fontSize = '20px';
+    levelElement.style.color = 'white';
+    levelElement.style.textShadow = '0 0 5px #00ffaa';
+    levelElement.style.fontFamily = 'Arial, sans-serif';
+    levelElement.style.marginBottom = '5px';
+    levelElement.textContent = `Level: ${currentLevel}/${maxLevel}`;
+    
+    // Индикатор прогресса миссии
+    const missionContainer = document.createElement('div');
+    missionContainer.style.width = '200px';
+    missionContainer.style.display = 'flex';
+    missionContainer.style.flexDirection = 'column';
+    missionContainer.style.marginBottom = '10px';
+    
+    const missionLabel = document.createElement('div');
+    missionLabel.style.color = 'white';
+    missionLabel.style.fontSize = '16px';
+    missionLabel.style.marginBottom = '5px';
+    missionLabel.textContent = 'Mission Progress:';
+    
+    const missionProgressOuter = document.createElement('div');
+    missionProgressOuter.style.width = '100%';
+    missionProgressOuter.style.height = '15px';
+    missionProgressOuter.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    missionProgressOuter.style.borderRadius = '10px';
+    missionProgressOuter.style.overflow = 'hidden';
+    
+    const missionProgressInner = document.createElement('div');
+    missionProgressInner.id = 'mission-progress';
+    missionProgressInner.style.width = `${(dataCollected / missionObjective) * 100}%`;
+    missionProgressInner.style.height = '100%';
+    missionProgressInner.style.backgroundColor = '#ffcc00';
+    missionProgressInner.style.borderRadius = '10px';
+    missionProgressInner.style.transition = 'width 0.3s';
+    
+    const missionText = document.createElement('div');
+    missionText.id = 'mission-text';
+    missionText.style.color = 'white';
+    missionText.style.fontSize = '14px';
+    missionText.style.marginTop = '5px';
+    missionText.style.textAlign = 'right';
+    missionText.textContent = `Data: ${dataCollected}/${missionObjective}`;
+    
+    missionProgressOuter.appendChild(missionProgressInner);
+    missionContainer.appendChild(missionLabel);
+    missionContainer.appendChild(missionProgressOuter);
+    missionContainer.appendChild(missionText);
+    
+    scoreContainer.appendChild(scoreElement);
+    scoreContainer.appendChild(levelElement);
+    scoreContainer.appendChild(missionContainer);
+    
+    document.body.appendChild(scoreContainer);
+}
+
+// Функция обновления UI счета и прогресса
+function updateScoreUI() {
+    const scoreElement = document.getElementById('score');
+    if (scoreElement) {
+        scoreElement.textContent = `Score: ${gameScore}`;
+    }
+    
+    const levelElement = document.getElementById('level');
+    if (levelElement) {
+        levelElement.textContent = `Level: ${currentLevel}/${maxLevel}`;
+    }
+    
+    // --- Обновление прогресса миссии в зависимости от типа ---
+    const missionLabel = document.querySelector('#score-container div:nth-child(3) > div:nth-child(1)'); // Находим лейбл миссии
+    const missionProgressOuter = document.querySelector('#score-container div:nth-child(3) > div:nth-child(2)'); // Находим внешний контейнер прогресса
+    const missionProgressInner = document.getElementById('mission-progress');
+    const missionText = document.getElementById('mission-text');
+
+    if (!missionLabel || !missionProgressOuter || !missionProgressInner || !missionText) {
+         console.warn("Mission UI elements not found for update!");
+         return;
+    }
+
+    switch(missionType) {
+        case 'collect_data':
+            missionLabel.textContent = 'Mission Progress:';
+            missionText.textContent = `Data: ${dataCollected}/${missionObjective}`; 
+            const progressPercent = Math.min(100, (dataCollected / missionObjective) * 100);
+            missionProgressInner.style.width = `${progressPercent}%`;
+            missionProgressOuter.style.display = 'block'; // Показываем прогресс бар
+            missionText.style.display = 'block'; // Показываем текст данных
+            break;
+        case 'flight_to_point':
+            missionLabel.textContent = 'Objective:'; 
+            missionText.textContent = 'Reach Extraction Point'; 
+            missionProgressOuter.style.display = 'none'; // Скрываем прогресс бар
+            missionText.style.display = 'block'; // Показываем текст цели
+            break;
+        case 'boss_fight':
+            missionLabel.textContent = 'Objective:'; 
+            missionText.textContent = 'Defeat the Mothership'; 
+            missionProgressOuter.style.display = 'none'; // Скрываем прогресс бар
+            missionText.style.display = 'block'; // Показываем текст цели
+            // Индикатор здоровья босса обновляется отдельно
+            break;
+        default:
+            missionLabel.textContent = 'Mission Progress:';
+            missionText.textContent = 'Unknown Objective';
+            missionProgressOuter.style.display = 'none'; // Скрываем прогресс бар
+            missionText.style.display = 'block'; // Показываем текст
+    }
+    // --- Конец обновления прогресса миссии ---
+
+    /* Старый код обновления прогресса (закомментирован) 
+    const missionProgress = document.getElementById('mission-progress');
+    if (missionProgress) {
+        missionProgress.style.width = `${Math.min(100, (dataCollected / missionObjective) * 100)}%`;
+    }
+    
+    const missionText = document.getElementById('mission-text');
+    if (missionText) {
+        missionText.textContent = `Data: ${dataCollected}/${missionObjective}`;
+    }
+    */
+}
+
+// Функция отображения вступления с сюжетом
+function showMissionIntro() {
+    const introOverlay = document.createElement('div');
+    introOverlay.id = 'intro-overlay';
+    introOverlay.style.position = 'fixed';
+    introOverlay.style.top = '0';
+    introOverlay.style.left = '0';
+    introOverlay.style.width = '100%';
+    introOverlay.style.height = '100%';
+    introOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    introOverlay.style.zIndex = '9999';
+    introOverlay.style.display = 'flex';
+    introOverlay.style.flexDirection = 'column';
+    introOverlay.style.justifyContent = 'center';
+    introOverlay.style.alignItems = 'center';
+    introOverlay.style.padding = '0 50px';
+    // Добавляем overflow-y для скролла, если контент не помещается
+    introOverlay.style.overflowY = 'auto'; 
+
+    const titleElement = document.createElement('h1');
+    titleElement.textContent = 'MISSION "RETURN"';
+    titleElement.style.color = '#00aaff';
+    titleElement.style.fontSize = '3rem';
+    titleElement.style.marginBottom = '1rem';
+    titleElement.style.fontFamily = 'Arial, sans-serif';
+    titleElement.style.textAlign = 'center';
+    titleElement.style.textShadow = '0 0 10px #00aaff';
+    
+    const storyContainer = document.createElement('div');
+    storyContainer.style.width = '80%';
+    storyContainer.style.maxWidth = '800px';
+    storyContainer.style.backgroundColor = 'rgba(0, 20, 40, 0.7)';
+    storyContainer.style.padding = '20px'; // Уменьшаем padding (было 30px)
+    storyContainer.style.borderRadius = '10px';
+    storyContainer.style.marginBottom = '20px'; // Уменьшаем нижний отступ (было 30px)
+    storyContainer.style.boxShadow = '0 0 20px rgba(0, 170, 255, 0.5)';
+    storyContainer.style.boxSizing = 'border-box'; // Добавляем box-sizing
+    
+    const storyText = document.createElement('p');
+    storyText.innerHTML = `
+        Year 2157. You are the pilot of the research vessel "Cosmo-1", on a secret mission.<br><br>
+        During routine space exploration near the Orion constellation, your ship discovered
+        traces of an ancient alien civilization that developed instant space travel technology.<br><br>
+        After collecting some data, you fell into a trap - your ship ended up in an area controlled by hostile
+        automated defense systems guarding this secret knowledge.<br><br>
+        <strong>Your task:</strong> Collect the necessary data fragments, dodging asteroids and fighting
+        enemy ships, to restore the complete technology and return home.
+    `;
+    storyText.style.color = 'white';
+    storyText.style.fontSize = '1.1rem';
+    storyText.style.lineHeight = '1.5';
+    storyText.style.fontFamily = 'Arial, sans-serif';
+    storyText.style.textAlign = 'justify';
+    
+    const missionObjectives = document.createElement('div');
+    missionObjectives.innerHTML = `
+        <h3>LEVEL 1 OBJECTIVES:</h3>
+        <ul>
+            <li>Collect ${missionObjective} data fragments</li>
+            <li>Destroy enemy ships (fighters, destroyers, scouts)</li>
+            <li>Avoid asteroid collisions</li>
+            <li>Collect health packs to restore health</li>
+        </ul>
+    `;
+    missionObjectives.style.color = '#ffcc00';
+    missionObjectives.style.fontSize = '1.1rem';
+    missionObjectives.style.lineHeight = '1.5';
+    missionObjectives.style.fontFamily = 'Arial, sans-serif';
+    missionObjectives.style.marginTop = '15px'; // Уменьшаем (было 20px)
+    missionObjectives.style.marginBottom = '20px'; // Уменьшаем (было 30px)
+    
+    const controlsHelp = document.createElement('div');
+    controlsHelp.innerHTML = `
+        <h3>CONTROLS:</h3>
+        <p>W, A, S, D - Ship movement</p>
+        <p>Mouse - Camera control and aiming</p>
+        <p>Left Mouse Button - Shoot</p> 
+    `;
+    controlsHelp.style.color = '#aaddff';
+    controlsHelp.style.fontSize = '1rem';
+    controlsHelp.style.lineHeight = '1.2';
+    controlsHelp.style.fontFamily = 'Arial, sans-serif';
+    controlsHelp.style.marginBottom = '20px'; // Уменьшаем (было 30px)
+    
+    const startButton = document.createElement('button');
+    startButton.textContent = 'START MISSION';
+    startButton.style.backgroundColor = '#00aaff';
+    startButton.style.color = 'white';
+    startButton.style.border = 'none';
+    startButton.style.padding = '12px 40px'; // Уменьшаем вертикальный padding (было 15px)
+    startButton.style.fontSize = '1.5rem';
+    startButton.style.fontFamily = 'Arial, sans-serif';
+    startButton.style.borderRadius = '5px';
+    startButton.style.cursor = 'pointer';
+    startButton.style.boxShadow = '0 0 15px rgba(0, 170, 255, 0.7)';
+    startButton.style.transition = 'all 0.2s';
+    startButton.style.boxSizing = 'border-box'; // Добавляем box-sizing
+    
+    startButton.onmouseover = function() {
+        this.style.backgroundColor = '#22ccff';
+        this.style.transform = 'scale(1.05)';
+    };
+    startButton.onmouseout = function() {
+        this.style.backgroundColor = '#00aaff';
+        this.style.transform = 'scale(1)';
+    };
+    
+    startButton.onclick = function() {
+        introOverlay.style.opacity = '0';
+        introOverlay.style.transition = 'opacity 1s';
+        gameStarted = true;
+        
+        // Удаляем интро через 1 секунду после начала исчезновения
+        setTimeout(() => {
+            document.body.removeChild(introOverlay);
+            
+            // Разблокируем управление камерой
+            controls.lock();
+        }, 1000);
+    };
+    
+    storyContainer.appendChild(storyText);
+    storyContainer.appendChild(missionObjectives);
+    storyContainer.appendChild(controlsHelp);
+    
+    introOverlay.appendChild(titleElement);
+    introOverlay.appendChild(storyContainer);
+    introOverlay.appendChild(startButton);
+    
+    document.body.appendChild(introOverlay);
+}
+
+// Функция для отображения завершения уровня
+function showLevelComplete() {
+    // Устанавливаем флаг завершения уровня ЗДЕСЬ
+    levelCompleted = true;
+    // Разблокируем курсор
+    controls.unlock(); 
+
+    // Создаем оверлей с затемнением и сообщением о завершении уровня
+    const levelCompleteOverlay = document.createElement('div');
+    levelCompleteOverlay.id = 'level-complete-overlay';
+    levelCompleteOverlay.style.position = 'absolute';
+    levelCompleteOverlay.style.top = '0';
+    levelCompleteOverlay.style.left = '0';
+    levelCompleteOverlay.style.width = '100%';
+    levelCompleteOverlay.style.height = '100%';
+    levelCompleteOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    levelCompleteOverlay.style.display = 'flex';
+    levelCompleteOverlay.style.flexDirection = 'column';
+    levelCompleteOverlay.style.justifyContent = 'center';
+    levelCompleteOverlay.style.alignItems = 'center';
+    levelCompleteOverlay.style.zIndex = '9999';
+    levelCompleteOverlay.style.color = 'white';
+    levelCompleteOverlay.style.fontFamily = 'Arial, sans-serif';
+    
+    let levelCompleteHeading = document.createElement('h1');
+    levelCompleteHeading.textContent = `LEVEL ${currentLevel} COMPLETE`;
+    levelCompleteHeading.style.fontSize = '48px';
+    levelCompleteHeading.style.marginBottom = '20px';
+    levelCompleteHeading.style.textShadow = '0 0 10px #00ffff';
+    
+    let statsContainer = document.createElement('div');
+    statsContainer.style.fontSize = '24px';
+    statsContainer.style.marginBottom = '40px';
+    statsContainer.style.textAlign = 'center';
+    statsContainer.style.lineHeight = '1.5';
+    
+    // Статистика завершенного уровня
+    let statsHTML = `
+        <p>Enemies Destroyed: ${enemiesDefeated}</p>
+        <p>Data Fragments Collected: ${dataCollected}</p>
+        <p>Current Score: ${gameScore}</p>
+    `;
+    
+    if (currentLevel === maxLevel) {
+        statsHTML += `<p style="color: #ffcc00; font-size: 32px; margin-top: 20px;">GAME COMPLETED!</p>`;
+    }
+    
+    statsContainer.innerHTML = statsHTML;
+    
+    // Кнопка для перехода на следующий уровень или завершения игры
+    let nextButton = document.createElement('button');
+    if (currentLevel < maxLevel) {
+        nextButton.textContent = 'NEXT LEVEL';
+    } else {
+        nextButton.textContent = 'FINISH GAME';
+    }
+    
+    nextButton.style.padding = '15px 30px';
+    nextButton.style.fontSize = '24px';
+    nextButton.style.backgroundColor = '#007bff';
+    nextButton.style.color = 'white';
+    nextButton.style.border = 'none';
+    nextButton.style.borderRadius = '5px';
+    nextButton.style.cursor = 'pointer';
+    nextButton.style.transition = 'background-color 0.3s';
+    
+    nextButton.addEventListener('mouseover', function() {
+        this.style.backgroundColor = '#0056b3';
+    });
+    
+    nextButton.addEventListener('mouseout', function() {
+        this.style.backgroundColor = '#007bff';
+    });
+    
+    nextButton.addEventListener('click', function() {
+        document.body.removeChild(levelCompleteOverlay);
+        
+        if (currentLevel < maxLevel) {
+            // Увеличиваем уровень и сбрасываем показатели миссии
+            currentLevel++;
+            dataCollected = 0;
+            enemiesDefeated = 0;
+            levelCompleted = false;
+            
+            // Настраиваем новую миссию в зависимости от текущего уровня
+            if (currentLevel === 2) {
+                // На втором уровне - миссия по полету к точке
+                missionType = 'flight_to_point';
+                setupFlightMission();
+                
+                // Обновляем UI с информацией о новой миссии
+                updateScoreUI();
+            } else if (currentLevel === 3) {
+                // На третьем уровне - битва с боссом
+                missionType = 'boss_fight';
+                setupBossMission();
+                
+                // Обновляем UI с информацией о новой миссии
+                updateScoreUI();
+            }
+            
+            // Возобновляем игру
+            controls.lock();
+        } else {
+            // Если игра завершена, возвращаемся на начальный экран
+            location.reload();
+        }
+    });
+    
+    levelCompleteOverlay.appendChild(levelCompleteHeading);
+    levelCompleteOverlay.appendChild(statsContainer);
+    levelCompleteOverlay.appendChild(nextButton);
+    
+    document.body.appendChild(levelCompleteOverlay);
+} 
+
+// Функция для показа описания текущей миссии
+function showMissionDescription() {
+    // Создаем оверлей для описания миссии
+    const missionOverlay = document.createElement('div');
+    missionOverlay.id = 'mission-overlay';
+    missionOverlay.style.position = 'fixed';
+    missionOverlay.style.top = '0';
+    missionOverlay.style.left = '0';
+    missionOverlay.style.width = '100%';
+    missionOverlay.style.height = '100%';
+    missionOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    missionOverlay.style.zIndex = '9999';
+    missionOverlay.style.display = 'flex';
+    missionOverlay.style.flexDirection = 'column';
+    missionOverlay.style.justifyContent = 'center';
+    missionOverlay.style.alignItems = 'center';
+    missionOverlay.style.padding = '0 50px';
+    
+    const titleElement = document.createElement('h1');
+    titleElement.textContent = `LEVEL ${currentLevel}: ${getMissionTitle()}`;
+    titleElement.style.color = '#00aaff';
+    titleElement.style.fontSize = '3rem';
+    titleElement.style.marginBottom = '1rem';
+    titleElement.style.fontFamily = 'Arial, sans-serif';
+    titleElement.style.textAlign = 'center';
+    titleElement.style.textShadow = '0 0 10px #00aaff';
+    
+    const descContainer = document.createElement('div');
+    descContainer.style.width = '80%';
+    descContainer.style.maxWidth = '800px';
+    descContainer.style.backgroundColor = 'rgba(0, 20, 40, 0.7)';
+    descContainer.style.padding = '30px';
+    descContainer.style.borderRadius = '10px';
+    descContainer.style.marginBottom = '30px';
+    descContainer.style.boxShadow = '0 0 20px rgba(0, 170, 255, 0.5)';
+    
+    const descText = document.createElement('p');
+    descText.innerHTML = getMissionDescription();
+    descText.style.color = 'white';
+    descText.style.fontSize = '1.1rem';
+    descText.style.lineHeight = '1.5';
+    descText.style.fontFamily = 'Arial, sans-serif';
+    descText.style.textAlign = 'justify';
+    
+    const objectivesElement = document.createElement('div');
+    objectivesElement.innerHTML = getMissionObjectives();
+    objectivesElement.style.color = '#ffcc00';
+    objectivesElement.style.fontSize = '1.1rem';
+    objectivesElement.style.lineHeight = '1.5';
+    objectivesElement.style.fontFamily = 'Arial, sans-serif';
+    objectivesElement.style.marginTop = '20px';
+    objectivesElement.style.marginBottom = '30px';
+    
+    const startButton = document.createElement('button');
+    startButton.textContent = 'START MISSION';
+    startButton.style.backgroundColor = '#00aaff';
+    startButton.style.color = 'white';
+    startButton.style.border = 'none';
+    startButton.style.padding = '15px 40px';
+    startButton.style.fontSize = '1.5rem';
+    startButton.style.fontFamily = 'Arial, sans-serif';
+    startButton.style.borderRadius = '5px';
+    startButton.style.cursor = 'pointer';
+    startButton.style.boxShadow = '0 0 15px rgba(0, 170, 255, 0.7)';
+    startButton.style.transition = 'all 0.2s';
+    
+    startButton.onmouseover = function() {
+        this.style.backgroundColor = '#22ccff';
+        this.style.transform = 'scale(1.05)';
+    };
+    startButton.onmouseout = function() {
+        this.style.backgroundColor = '#00aaff';
+        this.style.transform = 'scale(1)';
+    };
+    
+    startButton.onclick = function() {
+        missionOverlay.style.opacity = '0';
+        missionOverlay.style.transition = 'opacity 1s';
+        
+        // Удаляем оверлей через 1 секунду
+        setTimeout(() => {
+            document.body.removeChild(missionOverlay);
+            controls.lock();
+        }, 1000);
+    };
+    
+    descContainer.appendChild(descText);
+    descContainer.appendChild(objectivesElement);
+    
+    missionOverlay.appendChild(titleElement);
+    missionOverlay.appendChild(descContainer);
+    missionOverlay.appendChild(startButton);
+    
+    document.body.appendChild(missionOverlay);
+}
+
+// Получаем заголовок миссии
+function getMissionTitle() {
+    switch (missionType) {
+        case 'collect_data':
+            return 'DATA COLLECTION';
+        case 'flight_to_point':
+            return 'FLIGHT TO EXTRACTION POINT';
+        case 'boss_fight':
+            return 'FINAL SHOWDOWN';
+        default:
+            return 'MISSION';
+    }
+}
+
+// Получаем описание миссии
+function getMissionDescription() {
+    switch (missionType) {
+        case 'collect_data':
+            if (currentLevel === 1) {
+                return `
+                    Year 2157. You are the pilot of the research vessel "Cosmo-1", on a secret mission.<br><br>
+                    During routine space exploration near the Orion constellation, your ship discovered
+                    traces of an ancient alien civilization that developed instant space travel technology.<br><br>
+                    After collecting some data, you fell into a trap - your ship ended up in an area controlled by hostile
+                    automated defense systems guarding this secret knowledge.<br><br>
+                    <strong>Your task:</strong> Collect the necessary data fragments, dodging asteroids and fighting
+                    enemy ships, to restore the complete technology and return home.
+                `;
+            } else {
+                return `
+                    After successfully escaping the defense systems, you need to gather more data about the travel technology.<br><br>
+                    Your ship has detected signals indicating the presence of additional fragments of the ancient database.<br><br>
+                    <strong>Your task:</strong> Collect more data fragments while fighting new waves of defense systems.
+                    This data will allow you to finally decipher the ancient travel technology.
+                `;
+            }
+        case 'flight_to_point':
+            return `
+                Having collected the first batch of data, you managed to activate an ancient beacon showing the path to an evacuation ship.<br><br>
+                You have detected the signal of a rescue ship that will help you leave this dangerous area of space.<br><br>
+                But to reach it, you need to fly through a dense asteroid cluster and past defense system patrols.<br><br>
+                <strong>Your task:</strong> Reach the extraction point marked by the bright beacon. To do this, you need to fly
+                through all obstacles and defense systems.
+            `;
+        case 'boss_fight':
+            return `
+                You have almost reached your goal and collected most of the necessary data, but suddenly your ship was detected
+                by the main defense node - a huge mothership controlled by artificial intelligence.<br><br>
+                This is the flagship of the defense system, which holds the last fragments of the travel technology.<br><br>
+                <strong>Your task:</strong> Defeat the giant mothership, collect the remaining data fragments
+                and complete your mission. This battle will be the toughest challenge!
+            `;
+        default:
+            return "Mission description missing.";
+    }
+}
+
+// Получаем задачи миссии
+function getMissionObjectives() {
+    switch (missionType) {
+        case 'collect_data':
+            return `
+                <h3>MISSION OBJECTIVES:</h3>
+                <ul>
+                    <li>Collect ${missionObjective} data fragments</li>
+                    <li>Destroy enemy ships (fighters, destroyers, scouts)</li>
+                    <li>Avoid asteroid collisions</li>
+                    <li>Collect health packs to restore health</li>
+                </ul>
+            `;
+        case 'flight_to_point':
+            return `
+                <h3>MISSION OBJECTIVES:</h3>
+                <ul>
+                    <li>Reach the extraction point (marked by a bright beacon)</li>
+                    <li>Avoid asteroid collisions</li>
+                    <li>Destroy enemy ships along the way</li>
+                    <li>Collect health packs to restore health</li>
+                </ul>
+            `;
+        case 'boss_fight':
+            return `
+                <h3>MISSION OBJECTIVES:</h3>
+                <ul>
+                    <li>Destroy the Mothership (Boss)</li>
+                    <li>Collect ${missionObjective} data fragments</li>
+                    <li>Avoid the Mothership's powerful attacks</li>
+                    <li>Collect health packs to restore health</li>
+                </ul>
+            `;
+        default:
+            return "<h3>MISSION OBJECTIVES MISSING</h3>";
+    }
+} 
+
+// Функция настройки миссии полета
+function setupFlightMission() {
+    // Удаляем все существующие объекты с предыдущей миссии
+    clearMissionObjects();
+    
+    // Создаем маяк - конечную точку для полета
+    createWaypoint();
+    
+    // Создаем больше астероидов на пути к точке
+    for (let i = 0; i < MAX_ASTEROIDS * 1.5; i++) {
+        createAsteroid();
+    }
+    
+    // Создаем врагов на пути
+    for (let i = 0; i < MAX_ENEMIES; i++) {
+        createEnemy();
+    }
+}
+
+// Функция настройки миссии с боссом
+function setupBossMission() {
+    // Удаляем все существующие объекты с предыдущей миссии
+    clearMissionObjects();
+    
+    // Создаем босса
+    createBoss();
+    
+    // Создаем меньше астероидов для битвы с боссом
+    for (let i = 0; i < MAX_ASTEROIDS / 2; i++) {
+        createAsteroid();
+    }
+    
+    // Создаем меньше обычных врагов
+    for (let i = 0; i < MAX_ENEMIES / 2; i++) {
+        createEnemy();
+    }
+    
+    // Создаем индикатор здоровья босса
+    createBossHealthBar();
+}
+
+// Функция очистки объектов миссии
+function clearMissionObjects() {
+    // Удаляем маяк, если он существует
+    if (waypoint) {
+        scene.remove(waypoint);
+        waypoint = null;
+    }
+    
+    // Удаляем босса, если он существует
+    if (boss) {
+        scene.remove(boss);
+        boss = null;
+    }
+    
+    // Удаляем все астероиды
+    for (let i = asteroids.length - 1; i >= 0; i--) {
+        scene.remove(asteroids[i]);
+        asteroids.splice(i, 1);
+    }
+    
+    // Удаляем всех врагов
+    for (let i = aliens.length - 1; i >= 0; i--) {
+        scene.remove(aliens[i]);
+        aliens.splice(i, 1);
+    }
+    
+    // Удаляем все лазеры
+    for (let i = lasers.length - 1; i >= 0; i--) {
+        scene.remove(lasers[i]);
+        lasers.splice(i, 1);
+    }
+    
+    for (let i = enemyLasers.length - 1; i >= 0; i--) {
+        scene.remove(enemyLasers[i]);
+        enemyLasers.splice(i, 1);
+    }
+    
+    // Удаляем все аптечки
+    for (let i = healthPacks.length - 1; i >= 0; i--) {
+        scene.remove(healthPacks[i]);
+        healthPacks.splice(i, 1);
+    }
+    
+    // Удаляем все фрагменты данных
+    for (let i = dataFragments.length - 1; i >= 0; i--) {
+        scene.remove(dataFragments[i]);
+        dataFragments.splice(i, 1);
+    }
+}
+
+// Функция создания маяка (конечной точки)
+function createWaypoint() {
+    const distance = 2000; // Расстояние до конечной точки
+    
+    // Создаем группу для маяка
+    waypoint = new THREE.Group();
+    
+    // Создаем яркий шар в центре
+    const coreGeometry = new THREE.SphereGeometry(30, 32, 32);
+    const coreMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x00ffff, 
+        emissive: 0x00ffff,
+        emissiveIntensity: 2,
+        shininess: 100
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    
+    // Создаем внешнее свечение
+    const glowGeometry = new THREE.SphereGeometry(50, 32, 32);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0x00ffff,
+        transparent: true,
+        opacity: 0.3
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    
+    // Создаем кольца вокруг маяка
+    const ring1Geometry = new THREE.TorusGeometry(80, 5, 16, 100);
+    const ring1Material = new THREE.MeshPhongMaterial({
+        color: 0x00aaff,
+        emissive: 0x0077aa,
+        emissiveIntensity: 0.5
+    });
+    const ring1 = new THREE.Mesh(ring1Geometry, ring1Material);
+    ring1.rotation.x = Math.PI / 2;
+    
+    const ring2Geometry = new THREE.TorusGeometry(100, 3, 16, 100);
+    const ring2Material = new THREE.MeshPhongMaterial({
+        color: 0x0077aa,
+        emissive: 0x0077aa,
+        emissiveIntensity: 0.3
+    });
+    const ring2 = new THREE.Mesh(ring2Geometry, ring2Material);
+    ring2.rotation.x = Math.PI / 4;
+    
+    // Добавляем световой источник
+    const light = new THREE.PointLight(0x00ffff, 3, 1000);
+    
+    // Добавляем все компоненты к группе
+    waypoint.add(core);
+    waypoint.add(glow);
+    waypoint.add(ring1);
+    waypoint.add(ring2);
+    waypoint.add(light);
+    
+    // Позиционируем маяк впереди игрока на заданном расстоянии
+    const playerPosition = camera.position.clone();
+    const playerDirection = new THREE.Vector3();
+    camera.getWorldDirection(playerDirection); // Получаем направление взгляда камеры
+
+    // Рассчитываем позицию маяка: от позиции игрока + смещение вперед + небольшое смещение вверх
+    const waypointPosition = playerPosition.add(playerDirection.multiplyScalar(distance));
+    waypointPosition.y += 100; // Немного поднимаем маяк, чтобы он был лучше виден
+
+    waypoint.position.copy(waypointPosition);
+    
+    // Добавляем анимацию вращения
+    waypoint.userData.rotationSpeed = {
+        ring1: 0.005,
+        ring2: -0.007
+    };
+    
+    // Добавляем маяк на сцену
+    scene.add(waypoint);
+    
+    return waypoint;
+}
+
+// Функция создания босса
+function createBoss() {
+    // Создаем группу для босса
+    boss = new THREE.Group();
+    
+    // Материалы для босса
+    const bossBodyMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x330000,  // Темно-красный
+        specular: 0x111111,
+        shininess: 30,
+        metalness: 0.8
+    });
+    
+    const bossAccentMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x660000,  // Красный
+        specular: 0x222222,
+        shininess: 20
+    });
+    
+    const bossGlowMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xff0000,  // Ярко-красный
+        emissive: 0xff0000,
+        emissiveIntensity: 0.9,
+        specular: 0xffffff
+    });
+    
+    // Центральная часть (ядро) - большой шар
+    const coreGeometry = new THREE.SphereGeometry(20, 32, 32);
+    const core = new THREE.Mesh(coreGeometry, bossBodyMaterial);
+    
+    // Создаем кольцо вокруг ядра
+    const ringGeometry = new THREE.TorusGeometry(30, 5, 16, 100);
+    const ring = new THREE.Mesh(ringGeometry, bossAccentMaterial);
+    ring.rotation.x = Math.PI / 2;
+    
+    // Создаем "панцирь" вокруг ядра из нескольких сегментов
+    const armorSegmentCount = 8;
+    for (let i = 0; i < armorSegmentCount; i++) {
+        const angle = (i / armorSegmentCount) * Math.PI * 2;
+        
+        const segmentGeometry = new THREE.BoxGeometry(20, 40, 10);
+        const segment = new THREE.Mesh(segmentGeometry, bossBodyMaterial);
+        
+        // Располагаем сегменты вокруг ядра
+        segment.position.x = Math.cos(angle) * 30;
+        segment.position.z = Math.sin(angle) * 30;
+        
+        // Поворачиваем сегменты, чтобы они "смотрели" от центра
+        segment.rotation.y = -angle;
+        
+        boss.add(segment);
+    }
+    
+    // Создаем турели (орудия) на поверхности
+    const turretCount = 4;
+    boss.userData.turrets = [];
+    
+    for (let i = 0; i < turretCount; i++) {
+        const angle = (i / turretCount) * Math.PI * 2;
+        
+        // Основание турели
+        const baseGeometry = new THREE.CylinderGeometry(3, 5, 5, 8);
+        const base = new THREE.Mesh(baseGeometry, bossAccentMaterial);
+        
+        // Ствол турели
+        const barrelGeometry = new THREE.CylinderGeometry(2, 2, 15, 8);
+        barrelGeometry.rotateX(Math.PI / 2); // Поворачиваем, чтобы ствол смотрел вперед
+        const barrel = new THREE.Mesh(barrelGeometry, bossAccentMaterial);
+        barrel.position.z = -7.5;
+        
+        // Кончик ствола (светящийся)
+        const tipGeometry = new THREE.CylinderGeometry(2.5, 0, 5, 8);
+        tipGeometry.rotateX(Math.PI / 2);
+        const tip = new THREE.Mesh(tipGeometry, bossGlowMaterial);
+        tip.position.z = -15;
+        
+        // Группируем части турели
+        const turret = new THREE.Group();
+        turret.add(base);
+        turret.add(barrel);
+        turret.add(tip);
+        
+        // Позиционируем турель
+        turret.position.x = Math.cos(angle) * 50;
+        turret.position.z = Math.sin(angle) * 50;
+        turret.position.y = Math.sin(angle) * 10; // Небольшой разброс по высоте
+        
+        // Сохраняем данные для турели
+        turret.userData = {
+            lastShotTime: 0,
+            shootingCooldown: 2 + Math.random() * 3 // Случайное время перезарядки от 2 до 5 секунд
+        };
+        
+        boss.add(turret);
+        boss.userData.turrets.push(turret);
+    }
+    
+    // Добавляем энергетическое ядро (светящийся шар в центре)
+    const energyCoreGeometry = new THREE.SphereGeometry(10, 32, 32);
+    const energyCore = new THREE.Mesh(energyCoreGeometry, bossGlowMaterial);
+    boss.add(energyCore);
+    
+    // Добавляем свет из ядра
+    const coreLight = new THREE.PointLight(0xff0000, 1.5, 200);
+    boss.add(coreLight);
+    
+    // Задаем начальные параметры боссу
+    boss.position.set(0, 100, -1000); // Располагаем вдалеке перед игроком
+    boss.userData.health = bossMaxHealth;
+    boss.userData.state = 'approach'; // Начальное состояние - приближение к игроку
+    boss.userData.approachSpeed = 10;
+    boss.userData.orbitSpeed = 0.2;
+    boss.userData.orbitDistance = 300;
+    boss.userData.orbitAngle = 0;
+    boss.userData.attackCooldown = 0;
+    
+    // Сбрасываем здоровье босса
+    bossHealth = bossMaxHealth;
+    
+    // Добавляем босса на сцену
+    scene.add(boss);
+    
+    return boss;
+}
+
+// Функция создания индикатора здоровья босса
+function createBossHealthBar() {
+    bossHealthBar = document.createElement('div');
+    bossHealthBar.id = 'boss-health-bar';
+    bossHealthBar.style.position = 'absolute';
+    bossHealthBar.style.top = '50px';
+    bossHealthBar.style.left = '50%';
+    bossHealthBar.style.transform = 'translateX(-50%)';
+    bossHealthBar.style.width = '80%';
+    bossHealthBar.style.maxWidth = '800px';
+    bossHealthBar.style.height = '20px';
+    bossHealthBar.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    bossHealthBar.style.border = '2px solid #990000';
+    bossHealthBar.style.borderRadius = '10px';
+    bossHealthBar.style.overflow = 'hidden';
+    bossHealthBar.style.zIndex = '9999';
+    
+    const bossHealthFill = document.createElement('div');
+    bossHealthFill.id = 'boss-health-fill';
+    bossHealthFill.style.width = '100%';
+    bossHealthFill.style.height = '100%';
+    bossHealthFill.style.backgroundColor = '#ff0000';
+    bossHealthFill.style.transition = 'width 0.3s';
+    
+    const bossNameLabel = document.createElement('div');
+    bossNameLabel.textContent = 'MOTHERSHIP';
+    bossNameLabel.style.position = 'absolute';
+    bossNameLabel.style.top = '-25px';
+    bossNameLabel.style.width = '100%';
+    bossNameLabel.style.textAlign = 'center';
+    bossNameLabel.style.color = '#ff0000';
+    bossNameLabel.style.fontFamily = 'Arial, sans-serif';
+    bossNameLabel.style.fontSize = '18px';
+    bossNameLabel.style.fontWeight = 'bold';
+    bossNameLabel.style.textShadow = '0 0 5px #ff0000';
+    
+    bossHealthBar.appendChild(bossHealthFill);
+    bossHealthBar.appendChild(bossNameLabel);
+    
+    document.body.appendChild(bossHealthBar);
+}
+
+// Функция обновления индикатора здоровья босса
+function updateBossHealthBar() {
+    if (bossHealthBar && boss) {
+        const healthPercent = (bossHealth / bossMaxHealth) * 100;
+        const healthFill = document.getElementById('boss-health-fill');
+        if (healthFill) {
+            healthFill.style.width = `${healthPercent}%`;
+            
+            // Меняем цвет в зависимости от оставшегося здоровья
+            if (healthPercent > 50) {
+                healthFill.style.backgroundColor = '#ff0000';
+            } else if (healthPercent > 25) {
+                healthFill.style.backgroundColor = '#ff6600';
+            } else {
+                healthFill.style.backgroundColor = '#ffcc00';
+            }
+        }
+    }
+}
+
+function update() {
+    if (gameStarted && !gameOver && !levelCompleted) {
+        const delta = clock.getDelta();
+        
+        // Обработка столкновений между лазерами игрока и астероидами/врагами
+        handleLaserCollisions();
+        
+        // Обработка поведения врагов и их стрельбы
+        handleEnemyAI(delta);
+        
+        // Обработка столкновений между игроком и астероидами/врагами/аптечками/фрагментами данных
+        handlePlayerCollisions();
+        
+        // Обработка целей миссии в зависимости от её типа
+        handleMissionObjectives();
+        
+        // Обновление позиций лазеров
+        updateLasers(delta);
+        
+        // Вращение астероидов и дрейф
+        rotateAsteroids(delta);
+        
+        // Обновление позиций аптечек и фрагментов данных (вращение для визуального эффекта)
+        updateCollectableItems(delta);
+        
+        // Обновляем индикаторы врагов
+        updateEnemyIndicators();
+        
+        // Если игрок нажимает на клавиши движения
+        handlePlayerMovement(delta);
+        
+        // Обновляем позицию и поворот камеры
+        controls.getObject().position.y += velocity.y * delta;
+        
+        // Проверка космических границ
+        checkBoundaries();
+    }
+}
+
+// Функция обработки целей миссии в зависимости от типа
+function handleMissionObjectives() {
+    switch(missionType) {
+        case 'collect_data':
+            // Если собрано достаточно данных, миссия завершена
+            if (dataCollected >= missionObjective) {
+                showLevelComplete();
+            }
+            break;
+            
+        case 'flight_to_point':
+            // Проверяем, достиг ли игрок точки назначения
+            if (waypoint) {
+                const distanceToWaypoint = camera.position.distanceTo(waypoint.position);
+                
+                // !!! Отладочный вывод расстояния !!!
+                console.log("Distance to waypoint:", distanceToWaypoint);
+
+                // Если расстояние до точки назначения меньше определенного порога, миссия завершена
+                if (distanceToWaypoint < 200) {
+                    console.log("!!! Waypoint reached, calling showLevelComplete !!!");
+                    endPointReached = true;
+                    showLevelComplete();
+                }
+                
+                // Анимируем маяк
+                animateWaypoint(waypoint);
+            }
+            break;
+            
+        case 'boss_fight':
+            // Обновляем поведение босса
+            if (boss) {
+                updateBoss();
+                
+                // Обновляем индикатор здоровья босса
+                updateBossHealthBar();
+                
+                // Если здоровье босса достигло нуля, миссия завершена
+                if (bossHealth <= 0) {
+                    bossDefeated = true;
+                    showLevelComplete();
+                }
+            }
+            break;
+    }
+}
+
+// Функция анимации маяка (точки назначения)
+function animateWaypoint(waypoint) {
+    // Вращаем кольца маяка
+    const rings = waypoint.children.filter(child => child.geometry && child.geometry.type.includes('Torus'));
+    if (rings.length >= 2) {
+        rings[0].rotation.z += waypoint.userData.rotationSpeed.ring1;
+        rings[1].rotation.z += waypoint.userData.rotationSpeed.ring2;
+    }
+    
+    // Пульсирующий эффект
+    const core = waypoint.children.find(child => child.geometry && child.geometry.type.includes('Sphere'));
+    if (core) {
+        // Пульсация размера
+        const pulseFactor = Math.sin(Date.now() * 0.002) * 0.1 + 0.9;
+        core.scale.set(pulseFactor, pulseFactor, pulseFactor);
+        
+        // Пульсация свечения
+        if (core.material.emissiveIntensity) {
+            core.material.emissiveIntensity = 1.5 + Math.sin(Date.now() * 0.003) * 0.5;
+            core.material.needsUpdate = true;
+        }
+    }
+    
+    // Обновляем световой источник
+    const light = waypoint.children.find(child => child.type === 'PointLight');
+    if (light) {
+        light.intensity = 2.5 + Math.sin(Date.now() * 0.002) * 0.5;
+    }
+}
+
+// Функция обновления босса
+function updateBoss() {
+    if (!boss) return;
+    
+    // Получаем вектор от босса к игроку
+    const bossToPlayer = new THREE.Vector3();
+    bossToPlayer.subVectors(camera.position, boss.position);
+    const distanceToPlayer = bossToPlayer.length();
+    
+    // В зависимости от состояния босса
+    switch(boss.userData.state) {
+        case 'approach':
+            // Босс приближается к игроку, если слишком далеко
+            if (distanceToPlayer > boss.userData.orbitDistance * 1.5) {
+                const approachDirection = bossToPlayer.clone().normalize();
+                boss.position.add(approachDirection.multiplyScalar(boss.userData.approachSpeed));
+                
+                // Поворачиваем босса к игроку
+                boss.lookAt(camera.position);
+            } else {
+                // Когда достаточно близко, переходим к орбитальному движению
+                boss.userData.state = 'orbit';
+                boss.userData.orbitAngle = Math.random() * Math.PI * 2; // Случайный начальный угол
+            }
+            break;
+            
+        case 'orbit':
+            // Босс орбитально вращается вокруг игрока
+            boss.userData.orbitAngle += boss.userData.orbitSpeed;
+            
+            // Вычисляем новую позицию на орбите
+            const orbitX = camera.position.x + Math.cos(boss.userData.orbitAngle) * boss.userData.orbitDistance;
+            const orbitZ = camera.position.z + Math.sin(boss.userData.orbitAngle) * boss.userData.orbitDistance;
+            const orbitY = camera.position.y + Math.sin(boss.userData.orbitAngle * 0.5) * 50 + 100;
+            
+            boss.position.set(orbitX, orbitY, orbitZ);
+            
+            // Поворачиваем босса к игроку
+            boss.lookAt(camera.position);
+            
+            // Стреляем из турелей босса с заданной периодичностью
+            boss.userData.attackCooldown -= 0.01;
+            if (boss.userData.attackCooldown <= 0) {
+                shootBossTurrets();
+                boss.userData.attackCooldown = 0.1 + Math.random() * 0.2; // Случайная перезарядка
+            }
+            
+            // Если здоровье босса меньше 25%, переходит в отчаянное состояние
+            if (bossHealth < bossMaxHealth * 0.25 && boss.userData.state !== 'desperate') {
+                boss.userData.state = 'desperate';
+                boss.userData.orbitSpeed *= 1.5; // Увеличиваем скорость движения
+            }
+            break;
+            
+        case 'desperate':
+            // Отчаянное состояние - босс движется быстрее и стреляет чаще
+            boss.userData.orbitAngle += boss.userData.orbitSpeed;
+            
+            // Более хаотичное движение
+            const desperateX = camera.position.x + Math.cos(boss.userData.orbitAngle) * (boss.userData.orbitDistance + Math.sin(Date.now() * 0.001) * 50);
+            const desperateZ = camera.position.z + Math.sin(boss.userData.orbitAngle) * (boss.userData.orbitDistance + Math.sin(Date.now() * 0.001) * 50);
+            const desperateY = camera.position.y + Math.sin(boss.userData.orbitAngle) * 70 + 120;
+            
+            boss.position.set(desperateX, desperateY, desperateZ);
+            
+            // Поворачиваем босса к игроку
+            boss.lookAt(camera.position);
+            
+            // Стреляем чаще
+            boss.userData.attackCooldown -= 0.02;
+            if (boss.userData.attackCooldown <= 0) {
+                shootBossTurrets();
+                boss.userData.attackCooldown = 0.05 + Math.random() * 0.1; // Более быстрая перезарядка
+            }
+            break;
+    }
+    
+    // Вращаем турели босса, чтобы они всегда смотрели на игрока
+    if (boss.userData.turrets) {
+        boss.userData.turrets.forEach(turret => {
+            // Создаем мировую позицию турели
+            const turretWorldPosition = new THREE.Vector3();
+            turret.getWorldPosition(turretWorldPosition);
+            
+            // Вычисляем направление к игроку
+            const directionToPlayer = new THREE.Vector3();
+            directionToPlayer.subVectors(camera.position, turretWorldPosition);
+            
+            // Создаем новую точку, на которую должна смотреть турель
+            const targetPosition = new THREE.Vector3().addVectors(turretWorldPosition, directionToPlayer);
+            
+            // Поворачиваем турель к игроку
+            turret.lookAt(targetPosition);
+        });
+    }
+}
+
+// Функция стрельбы из турелей босса
+function shootBossTurrets() {
+    if (!boss || !boss.userData.turrets) return;
+    
+    // Выбираем случайное количество турелей для стрельбы
+    const turretsToShoot = 1 + Math.floor(Math.random() * boss.userData.turrets.length);
+    
+    // Случайным образом выбираем турели
+    const selectedTurrets = [];
+    while (selectedTurrets.length < turretsToShoot && selectedTurrets.length < boss.userData.turrets.length) {
+        const randomIndex = Math.floor(Math.random() * boss.userData.turrets.length);
+        const turret = boss.userData.turrets[randomIndex];
+        
+        // Проверяем, не выбрали ли мы уже эту турель
+        if (!selectedTurrets.includes(turret) && 
+            Date.now() - turret.userData.lastShotTime > turret.userData.shootingCooldown * 1000) {
+            selectedTurrets.push(turret);
+        }
+    }
+    
+    // Стреляем из выбранных турелей
+    selectedTurrets.forEach(turret => {
+        // Получаем мировую позицию турели
+        const turretWorldPosition = new THREE.Vector3();
+        turret.getWorldPosition(turretWorldPosition);
+        
+        // Направление к игроку с небольшим разбросом для сложности
+        const directionToPlayer = new THREE.Vector3();
+        directionToPlayer.subVectors(camera.position, turretWorldPosition);
+        
+        // Добавляем небольшой разброс
+        directionToPlayer.x += (Math.random() - 0.5) * 5;
+        directionToPlayer.y += (Math.random() - 0.5) * 5;
+        directionToPlayer.z += (Math.random() - 0.5) * 5;
+        
+        directionToPlayer.normalize();
+        
+        // Создаем лазер босса
+        createEnemyLaser(turretWorldPosition, directionToPlayer, ENEMY_LASER_SPEED * 1.2);
+        
+        // Обновляем время последнего выстрела
+        turret.userData.lastShotTime = Date.now();
+    });
 } 
