@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Космическое Путешествие 3D</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Сюда можно добавить элементы UI для выбора корабля/оружия -->
+    <div id="info">
+        Космическое Путешествие 3D<br/>
+        Управление: WASD - движение, Мышь - обзор, Пробел - стрельба (пока не реализовано)
+        <!-- Место для кода участника -->
+        <!-- Вставьте ваш код участника здесь -->
+    </div>
+    <div id="game-container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="script.js"></script>
+</body>
+</html> 
